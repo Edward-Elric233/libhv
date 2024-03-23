@@ -1,3 +1,6 @@
+# Bazel
+bazel-*
+
 # Compiled Object files
 *.o
 *.lo
