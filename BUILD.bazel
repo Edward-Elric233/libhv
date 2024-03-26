@@ -53,7 +53,8 @@ config_setting(
     name = "with_evpp",
     define_values = {
         "WITH_EVPP": "ON",
-    }
+    },
+    visibility = [":__subpackages__"]
 )
 
 config_setting(
@@ -61,7 +62,8 @@ config_setting(
     define_values = {
         "WITH_EVPP": "ON",
         "WITH_HTTP": "ON",
-    }
+    },
+    visibility = [":__subpackages__"]
 )
 
 config_setting(
@@ -70,7 +72,8 @@ config_setting(
         "WITH_EVPP": "ON",
         "WITH_HTTP": "ON",
         "WITH_HTTP_SERVER": "ON",
-    }
+    },
+    visibility = [":__subpackages__"]
 )
 
 config_setting(
@@ -79,7 +82,8 @@ config_setting(
         "WITH_EVPP": "ON",
         "WITH_HTTP": "ON",
         "WITH_HTTP_CLIENT": "ON",
-    }
+    },
+    visibility = [":__subpackages__"]
 )
 
 config_setting(
@@ -93,7 +97,8 @@ config_setting(
 
 config_setting(
     name = "with_mqtt",
-    define_values = {"WITH_MQTT": "ON"}
+    define_values = {"WITH_MQTT": "ON"},
+    visibility = [":__subpackages__"],
 )
 
 config_setting(
@@ -481,10 +486,8 @@ cc_library(
     name = "hv_static",
     srcs = SRCS,
     hdrs = HEADERS,
-    #includes = ["$(BINDIR)/include/hv"],
-    includes = ["$(location :copy_headers)"],
-    deps = [":copy_headers"],
-    defines = ["HV_DYNAMICLIB"],
+    includes = HEADERS_DIRS,
+    defines = ["HV_STATICLIB"],
     copts = COPTS,
     linkstatic = True,
     linkopts = LINKOPTS,
@@ -499,21 +502,21 @@ cc_library(
     defines = ["HV_DYNAMICLIB"],
     copts = COPTS,
     linkopts = LINKOPTS,
+    visibility = ["//visibility:public"]
 )
 
 filegroup(
     name = "libhv",
     srcs = select({
-        ":build_shared": [":hv"],
+        "build_shared": [":hv"],
         "//conditions:default": [],
     }) + select({
-        ":build_static": [":hv_static"],
+        "build_static": [":hv_static"],
         "//conditions:default": [],
-    }),
+    })  + select({
+        "build_examples": ["//examples:examples"],
+        "//conditions:default": [],
+    })
 )
 
-cc_binary(
-    name = "hloop_test",
-    srcs = ["examples/hloop_test.c"],
-    deps = [":hv"]
-)
+
