@@ -1,5 +1,18 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load(":utils.bzl", "print_list", "list_source_directories")
+load(":utils.bzl", "print_list", "list_source_directories", "get_headers")
+
+
+config_setting(
+    name = "ios",
+    constraint_values = ["@platforms//apple:ios"],
+)
+
+config_setting(
+    name = "msvc",
+    values = {
+        "compiler": "msvc-cl",
+    },
+)
 
 config_setting(
     name = "debug",
@@ -13,7 +26,7 @@ config_setting(
 
 config_setting(
     name = "build_shared",
-    define_values = {"BUILD_SHARED": "ON"}
+    define_values = {"BUILD_SHARED": "ON"},
 )
 
 config_setting(
@@ -23,7 +36,7 @@ config_setting(
 
 config_setting(
     name = "build_examples",
-    define_values = {"BUILD_EXAMPLES": "ON"}
+    define_values = {"BUILD_EXAMPLES": "ON"},
 )
 
 config_setting(
@@ -191,11 +204,37 @@ genrule(
     name = "config",
     srcs = ["configure"],
     outs = ["hconfig.h"],
-    cmd = "(./$(location configure) && cp hconfig.h $@) || exit 1",
+    cmd = "(./configure && cp hconfig.h $@) || exit 1",
     local = 1,
 )
 
 INCLUDES = [".", "include", "3rd/include"]
+
+HEADERS_DIRS = ["base", "ssl", "event"] + select({
+    "with_wepoll": ["event/wepoll"],
+    "//conditions:default": [],
+}) + select({
+    "with_kcp": ["event/kcp"],
+    "//conditions:default": [],
+}) + ["util"] + select({
+    "with_protocol": ["protocol"],
+    "//conditions:default": [],
+}) + select({
+    "with_evpp": ["cpputil", "evpp"],
+    "//conditions:default": [],
+}) + select({
+    "with_http": ["http"],
+    "//conditions:default": [],
+}) + select({
+    "with_http_server": ["http/server"],
+    "//conditions:default": [],
+}) + select({
+    "with_http_client": ["http/client"],
+    "//conditions:default": [],
+}) + select({
+    "with_mqtt": ["mqtt"],
+    "//conditions:default": [],
+})
 
 COPTS = select({
     "debug": ["-DDEBUG"],
@@ -227,6 +266,25 @@ COPTS = select({
     "//conditions:default": [],
 }) + select({
     "enable_windump": ["-DENABLE_WINDUMP"],
+    "//conditions:default": [],
+}) + select({
+    "build_for_mt_dbg": ["/MTd"],
+    "build_for_mt_opt": ["/MT"],
+    "//conditions:default": [],
+})
+
+LINKOPTS = select({
+    "msvc": [],
+    "//conditions:default": ["-pthread"],
+}) + select({
+    "@platforms//os:linux": [
+        "-lpthread",
+        "-lm",
+        "-ldl",
+    ],
+    "//conditions:default": [],
+}) + select({
+    "@bazel_tools//tools/cpp:gcc": ["-lrt"],
     "//conditions:default": [],
 })
 
@@ -364,12 +422,6 @@ HEADERS = ["hv.h", ":config", "hexport.h"] + BASE_HEADERS + SSL_HEADERS + EVENT_
     "//conditions:default": [],
 })
 
-genrule(
-    name = "copy_headers",
-    srcs = HEADERS,
-    outs = ["include/hv/headers.tar"],
-    cmd = "mkdir -p $(@D)/include/hv && cp $(SRCS) $(@D)/include/hv/ && tar -cf $@ -C $(@D)/include/hv .",
-)
 
 CORE_SRCS = glob(
     ["*.h"], exclude = ["*_test.c"]
@@ -391,7 +443,7 @@ SRCS = CORE_SRCS + glob(["util/*.h", "util/*.c", "util/*.cpp"], exclude = ["util
     "with_protocol": glob(["protocol/*.h", "protocol/*.c", "protocol/*.cpp"], exclude = ["protocol/*_test.c"]),
     "//conditions:default": [],
 }) + select({
-    "with_evpp": glob(["cpputil/*.h", "cpputil/*.c", "cpputil/*.cpp", "evpp/*.h", "evpp/*.c", "evpp/*.cpp"], exclude = ["cpputil/*_test.c", "evpp/*_test.c"]),
+    "with_evpp": glob(["cpputil/*.h", "cpputil/*.c", "cpputil/*.cpp", "evpp/*.h", "evpp/*.c", "evpp/*.cpp"], exclude = ["cpputil/*_test.c", "evpp/*_test.c", "evpp/*_test.cpp"]),
     "//conditions:default": [],
 }) + select({
     "with_http": glob(["http/*.h", "http/*.c", "http/*.cpp"], exclude = ["http/*_test.c"]),
@@ -407,42 +459,52 @@ SRCS = CORE_SRCS + glob(["util/*.h", "util/*.c", "util/*.cpp"], exclude = ["util
     "//conditions:default": [],
 })
 
-# srcs = list_source_directories(SRCDIRS, "**/*_test.c")
-# srcs = [file for dir in SRCDIRS for file in glob([dir + "/*.c"])]
-
 print_list(
     name = "test_srcs",
     srcs = SRCS,
     out = "test_srcs.log"
 )
 
+get_headers(
+    name = "get_headers",
+    hdrs = HEADERS,
+)
+
+genrule(
+    name = "copy_headers",
+    srcs = HEADERS,
+    outs = ["include/hv/headers.tar"],
+    cmd = "mkdir -p $(@D)/include/hv && cp $(SRCS) $(@D)/include/hv/ && tar -cf $@ -C $(@D)/include/hv .",
+)
+
 cc_library(
     name = "hv_static",
     srcs = SRCS,
-    hdrs = [":copy_headers"],
-    includes = ["include"],
-    deps = [],
+    hdrs = HEADERS,
+    #includes = ["$(BINDIR)/include/hv"],
+    includes = ["$(location :copy_headers)"],
+    deps = [":copy_headers"],
     defines = ["HV_DYNAMICLIB"],
     copts = COPTS,
+    linkstatic = True,
+    linkopts = LINKOPTS,
 )
 
 
 cc_library(
-    name = "hv_shared",
+    name = "hv",
     srcs = SRCS,
-    hdrs = [":copy_headers"],
-    includes = [":copy_headers"],
-    deps = [],
+    hdrs = HEADERS,
+    includes = HEADERS_DIRS,
     defines = ["HV_DYNAMICLIB"],
     copts = COPTS,
-    # linkshared = True,
-    linkopts = ["-shared"],
+    linkopts = LINKOPTS,
 )
 
 filegroup(
     name = "libhv",
     srcs = select({
-        ":build_shared": [":hv_shared"],
+        ":build_shared": [":hv"],
         "//conditions:default": [],
     }) + select({
         ":build_static": [":hv_static"],
@@ -450,4 +512,8 @@ filegroup(
     }),
 )
 
-
+cc_binary(
+    name = "hloop_test",
+    srcs = ["examples/hloop_test.c"],
+    deps = [":hv"]
+)

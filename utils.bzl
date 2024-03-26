@@ -17,3 +17,15 @@ print_list = rule(
         "out": attr.output(mandatory=True),
     }
 )
+
+def _get_headers_impl(ctx):
+    hdrs = ctx.attr.hdrs
+    output = ["include/hv/" + hdr.split("/")[-1] for hdr in hdrs]
+        
+
+get_headers = rule(
+    implementation = _get_headers_impl,
+    attrs = {
+        "hdrs": attr.string_list(mandatory=True),
+    }
+)
